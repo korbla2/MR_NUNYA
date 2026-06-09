@@ -1,0 +1,6 @@
+{
+  "name": "Feynman AI Tutor",
+  "description": "An AI-powered Feynman Technique educator tailored for coding, computer science, and software engineering. Learn complex technologies, systems, and algorithms deeply by explaining them simply.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
