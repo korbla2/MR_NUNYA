@@ -106,7 +106,22 @@ export default function App() {
     try {
       await signInWithPopup(auth, googleProvider);
     } catch (err: any) {
-      alert(`Google sign-in aborted or failed: ${err.message}`);
+      const errMsg = String(err?.message || err?.code || "");
+      if (errMsg.includes("unauthorized-domain") || errMsg.includes("auth/unauthorized-domain") || err?.code === "auth/unauthorized-domain") {
+        const currentDomain = window.location.hostname;
+        alert(`firebase-auth: Authorized Domain Required!
+
+The dynamic preview/dev domain "${currentDomain}" is not yet listed under your Firebase project's Authorized Domains.
+
+To authorize this domain and enable Cloud Sync:
+1. Go to your Firebase Console (console.firebase.google.com).
+2. Navigate to "Authentication" -> "Settings" tab -> "Authorized domains".
+3. Click "Add domain" and add exactly:
+   ${currentDomain}
+4. Save and try signing in again!`);
+      } else {
+        alert(`Google sign-in aborted or failed: ${err.message}`);
+      }
     } finally {
       setBusyState(false);
     }

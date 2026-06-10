@@ -316,17 +316,27 @@ app.post("/api/extract-file", upload.single("file"), async (req, res) => {
 
     if (mime.includes("pdf") || lowerName.endsWith(".pdf")) {
       console.log("[ExtractFile] Processing as PDF...");
+      
+      // Prevent memory exhaustion/Out Of Memory (OOM) crashes on large multi-book PDFs
+      if (size > 15 * 1024 * 1024) {
+        console.warn(`[ExtractFile] File size ${size} bytes exceeds safe limits (15MB).`);
+        return res.status(400).json({
+          error: `The PDF file is too large (${(size / 1024 / 1024).toFixed(1)} MB) to parse securely on our server. To prevent crash-restarts and timeouts, please upload a smaller PDF (under 15MB) or copy-paste your chapters directly into the manual text area.`
+        });
+      }
+
       let text = "";
       let pages = 1;
       let usedGeminiOCR = false;
 
       try {
-        console.log("[ExtractFile] Calling pdf-parse function...");
+        console.log("[ExtractFile] Calling pdf-parse function with limits...");
         const pdfParser = typeof pdfParseModule === "function" ? pdfParseModule : (pdfParseModule?.default || pdfParseModule);
         if (typeof pdfParser !== "function") {
           throw new Error("Resolved pdf-parse is not a function.");
         }
-        const result = await pdfParser(req.file.buffer);
+        // Limit parsing to max 100 pages to prevent memory crashes on the Node server
+        const result = await pdfParser(req.file.buffer, { max: 100 });
         text = result.text || "";
         pages = result.numpages || 1;
         console.log(`[ExtractFile] PDF parsing succeeded. Pages: ${pages}, Raw text length: ${text.length}`);
@@ -365,6 +375,13 @@ app.post("/api/extract-file", upload.single("file"), async (req, res) => {
         } catch (geminiErr: any) {
           console.warn("[ExtractFile] Gemini multimodal fallback failed or key matches undefined:", geminiErr.message);
         }
+      }
+
+      // If both extraction methods yielded absolutely nothing, let's return a clean 400 error message
+      if (!text.trim()) {
+        return res.status(400).json({
+          error: "Could not extract any readable text from this PDF file. It might be password-protected, corrupt, or contain only scanned visual images without selectable text. Please copy and paste its contents manually."
+        });
       }
 
       return res.json({
