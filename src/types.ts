@@ -93,7 +93,7 @@ export interface Course {
 }
 
 export interface AISettings {
-  provider: "demo" | "gemini" | "ollama" | "openai-compatible";
+  provider: "demo" | "gemini" | "ollama" | "openai-compatible" | "openrouter";
   ollamaUrl: string;
   model: string;
   apiBase: string;

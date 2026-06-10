@@ -52,6 +52,10 @@ export default function Settings({ settings, onSaveSettings, setBusy }: Settings
         payload.apiBase = apiBase;
         payload.apiKey = apiKey;
         payload.model = paidModel || model;
+      } else if (provider === "openrouter") {
+        endpoint = "/api/ai/openrouter";
+        payload.apiKey = apiKey;
+        payload.model = paidModel || model || "google/gemini-2.5-flash";
       } else if (provider === "demo") {
         setBusy(false);
         alert("Demo offline mode is active. No external connection is required to study!");
@@ -100,7 +104,8 @@ export default function Settings({ settings, onSaveSettings, setBusy }: Settings
             <option value="gemini">Google Gemini (Recommended - Preconfigured)</option>
             <option value="demo">Free Demo fallback (Offline / Mock)</option>
             <option value="ollama">Free Local Ollama (qwen2.5:7b, llama3...)</option>
-            <option value="openai-compatible">OpenAI-compatible Endpoint (OpenRouter, Groq, etc.)</option>
+            <option value="openai-compatible">OpenAI-compatible Endpoint (Groq, etc.)</option>
+            <option value="openrouter">OpenRouter API (Llama 3, Claude, Gemini, DeepSeek, etc.)</option>
           </select>
         </div>
 
@@ -161,6 +166,36 @@ export default function Settings({ settings, onSaveSettings, setBusy }: Settings
                 onChange={e => setPaidModel(e.target.value)}
                 placeholder="gpt-4o-mini, mixtral-8x7b, etc..."
               />
+            </div>
+          </div>
+        )}
+
+        {provider === "openrouter" && (
+          <div className="flex flex-col gap-3" id="openrouter-options">
+            <div className="grid two gap-3">
+              <div className="field">
+                <label htmlFor="set-or-key">OpenRouter API Key Secret</label>
+                <input
+                  id="set-or-key"
+                  type="password"
+                  value={apiKey}
+                  onChange={e => setApiKey(e.target.value)}
+                  placeholder="sk-or-v1-..."
+                />
+              </div>
+
+              <div className="field">
+                <label htmlFor="set-or-model">Model Name</label>
+                <input
+                  id="set-or-model"
+                  value={paidModel || model}
+                  onChange={e => {
+                    setPaidModel(e.target.value);
+                    setModel(e.target.value);
+                  }}
+                  placeholder="google/gemini-2.5-flash (default)"
+                />
+              </div>
             </div>
           </div>
         )}

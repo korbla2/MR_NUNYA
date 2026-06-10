@@ -3,6 +3,7 @@ import { Play, Terminal as TerminalIcon, Sparkles, AlertCircle, CheckCircle, Ref
 import { Course, Lesson, AISettings } from "../types";
 import { fireConfetti } from "./Exams";
 import { FormattedTechExplanation } from "./LessonTutor";
+import { callAIApi } from "../utils/ai";
 
 interface SystemLog {
   id: string;
@@ -469,21 +470,25 @@ ${code}
 Evaluate this program for correctness, algorithmic efficiency (Time complexity Big-O, Space complexity), logical bugs, memory leaks, or syntactic gaps. Grade fairly. Give deep interactive Feynman descriptions under 'analogy' and 'breakdown'. Return formatted JSON.`;
 
     try {
-      const response = await fetch("/api/ai/gemini", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt: promptMessage,
-          json: true,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error("Tutor communication channel timed out.");
+      let responseText = "";
+      if (settings.provider === "demo") {
+        responseText = JSON.stringify({
+          score: 85,
+          verdict: "COMPLETED",
+          analogy: "Think of your function parameters as a train ticket. Your ticket has all correct boarding entries.",
+          breakdown: "Great attempt! The code is optimal with O(N) complexity and satisfies the basic validation conditions. Perfect bounds.",
+          correctedCodeSnippet: code
+        });
+      } else {
+        responseText = await callAIApi(settings, promptMessage, true);
       }
 
-      const data = await response.json();
-      const parsedReview = JSON.parse(data.text);
+      const parsedReview = JSON.parse(
+        responseText
+          .trim()
+          .replace(/^```(?:json)?/i, "")
+          .replace(/```$/i, "")
+      );
 
       setAiReview({
         score: parsedReview.score,

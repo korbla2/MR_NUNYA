@@ -1,7 +1,12 @@
 import React, { useState, useEffect } from "react";
-import { Flame, Menu, X, Smartphone, Monitor, Wifi, Battery, Clock, Home, BookOpen, Brain, Code, Layers, Sparkles } from "lucide-react";
+import { Flame, Menu, X, Smartphone, Monitor, Wifi, Battery, Clock, Home, BookOpen, Brain, Code, Layers, Sparkles, LogIn, LogOut, Cloud, CloudOff, CloudLightning } from "lucide-react";
 import { Course, SourceDraft, AISettings, Lesson } from "./types";
 import { getLesson, ensureFlashcards, calculateDailyStreak } from "./utils";
+
+// Firebase imports
+import { auth, db as firestoreDb, googleProvider, OperationType, handleFirestoreError } from "./lib/firebase";
+import { onAuthStateChanged, User, signInWithPopup, signOut } from "firebase/auth";
+import { collection, doc, setDoc, deleteDoc, query, where, onSnapshot } from "firebase/firestore";
 
 // Component imports
 import Dashboard from "./components/Dashboard";
@@ -51,6 +56,107 @@ export default function App() {
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState<boolean>(false);
   const [androidFrameActive, setAndroidFrameActive] = useState<boolean>(false);
   const [currentTime, setCurrentTime] = useState<string>("");
+  const [user, setUser] = useState<User | null>(null);
+
+  // Sync and listen to Firestore-based user data
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (currUser) => {
+      setUser(currUser);
+      if (currUser) {
+        console.log("[Firebase Auth] User logged in:", currUser.uid);
+        
+        // Non-blocking connection validation check as requested by system skill
+        try {
+          const { doc, getDocFromServer } = await import("firebase/firestore");
+          await getDocFromServer(doc(firestoreDb, "test", "connection")).catch(() => {});
+        } catch (e) {}
+
+        // Set up secure real-time listener for user's courses
+        const q = query(collection(firestoreDb, "courses"), where("ownerId", "==", currUser.uid));
+        const unsubFn = onSnapshot(q, (snapshot) => {
+          const fbCourses: Course[] = [];
+          snapshot.forEach(docSnap => {
+            fbCourses.push(docSnap.data() as Course);
+          });
+          if (fbCourses.length > 0) {
+            const sorted = fbCourses.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+            setCourses(sorted);
+            localStorage.setItem(STORE_KEY, JSON.stringify({
+              theme,
+              courses: sorted,
+              settings,
+              sourceDraft: draft,
+              activeCourseId: activeCourseId || sorted[0]?.id || null,
+              activeLessonId: activeLessonId || (sorted[0] ? firstClassroomLessonOf(sorted[0]) : null),
+              route,
+            }));
+          }
+        }, (err) => {
+          handleFirestoreError(err, OperationType.LIST, "courses");
+        });
+
+        return () => unsubFn();
+      }
+    });
+    return () => unsubscribe();
+  }, [theme, settings, draft, route, activeCourseId, activeLessonId]);
+
+  const handleSignInGoogle = async () => {
+    setBusyState(true, "Launching secure Google Sign-in...");
+    try {
+      await signInWithPopup(auth, googleProvider);
+    } catch (err: any) {
+      alert(`Google sign-in aborted or failed: ${err.message}`);
+    } finally {
+      setBusyState(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    setBusyState(true, "Signing out user...");
+    try {
+      await signOut(auth);
+      const saved = localStorage.getItem(STORE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.courses) setCourses(parsed.courses);
+      } else {
+        setCourses([]);
+      }
+      setActiveCourseId(null);
+      setActiveLessonId(null);
+      setRoute("dashboard");
+    } catch (err: any) {
+      alert(`Signout failed: ${err.message}`);
+    } finally {
+      setBusyState(false);
+    }
+  };
+
+  const handleSyncLocalCoursesToCloud = async () => {
+    if (!auth.currentUser) {
+      alert("Please sign in with Google first to migrate courses to the cloud!");
+      return;
+    }
+    if (courses.length === 0) {
+      alert("No active local courses found to sync.");
+      return;
+    }
+    setBusyState(true, "Uploading local course syllabuses to Cloud Firestore...");
+    try {
+      let count = 0;
+      for (const course of courses) {
+        const withUid = { ...course, ownerId: auth.currentUser.uid };
+        await setDoc(doc(firestoreDb, "courses", course.id), withUid);
+        count++;
+      }
+      alert(`Successfully synchronized ${count} course(s) with your cloud database!`);
+    } catch (err: any) {
+      handleFirestoreError(err, OperationType.WRITE, "courses");
+    } finally {
+      setBusyState(false);
+    }
+  };
 
   useEffect(() => {
     const updateTime = () => {
@@ -117,12 +223,18 @@ export default function App() {
     // Async REST write syncs the course modifications directly on backend
     const activeId = newCourseId !== undefined ? newCourseId : activeCourseId;
     const courseObj = newCourses.find(c => c.id === activeId);
-    if (courseObj && location.protocol !== "file:") {
-      fetch(`/api/courses/${encodeURIComponent(courseObj.id)}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ course: courseObj }),
-      }).catch(err => console.warn("Backend database syncing offline fallback active. State saved locally.", err));
+    if (courseObj) {
+      if (auth.currentUser) {
+        const courseWithUid = { ...courseObj, ownerId: auth.currentUser.uid };
+        setDoc(doc(firestoreDb, "courses", courseObj.id), courseWithUid)
+          .catch(err => handleFirestoreError(err, OperationType.WRITE, `courses/${courseObj.id}`));
+      } else if (location.protocol !== "file:") {
+        fetch(`/api/courses/${encodeURIComponent(courseObj.id)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ course: courseObj }),
+        }).catch(err => console.warn("Backend database syncing offline fallback active. State saved locally.", err));
+      }
     }
   };
 
@@ -392,7 +504,10 @@ export default function App() {
     setCourses(filtered);
     saveState(filtered, settings, draft, nextRoute, nextActiveId, nextLessonId);
 
-    if (location.protocol !== "file:") {
+    if (auth.currentUser) {
+      deleteDoc(doc(firestoreDb, "courses", courseId))
+        .catch(err => handleFirestoreError(err, OperationType.DELETE, `courses/${courseId}`));
+    } else if (location.protocol !== "file:") {
       fetch(`/api/courses/${encodeURIComponent(courseId)}`, { method: "DELETE" }).catch(() => {});
     }
   };
@@ -580,6 +695,67 @@ export default function App() {
               </div>
             </div>
 
+            {/* Firebase Cloud Sync Control Container (Mobile Drawer) */}
+            <div className="flex flex-col gap-2 p-3 bg-[var(--panel)] border border-[var(--line)] rounded-xl mb-4 shadow-sm" id="firebase-auth-mobile-widget">
+              {user ? (
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7.5 h-7.5 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 text-white text-xs font-black flex items-center justify-center shrink-0 border border-white/25">
+                      {user.displayName ? user.displayName[0] : (user.email ? user.email[0].toUpperCase() : "U")}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <span className="text-xs font-extrabold text-[var(--text)] block truncate leading-none">
+                        {user.displayName || "Explorer"}
+                      </span>
+                      <span className="text-[9px] text-emerald-500 font-bold flex items-center gap-0.5 pt-0.5 select-none">
+                        <Cloud className="w-2.5 h-2.5 fill-emerald-500/10" /> Cloud database active
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 mt-1 select-none">
+                    <button
+                      onClick={() => {
+                        handleSyncLocalCoursesToCloud();
+                        setMobileDrawerOpen(false);
+                      }}
+                      className="flex-1 py-1.5 px-1.5 bg-purple-600 hover:bg-purple-700 text-white border-0 rounded-lg text-[9px] font-black uppercase tracking-wider cursor-pointer flex items-center justify-center gap-1"
+                      title="Upload offline syllabus data to Firestore"
+                      type="button"
+                    >
+                      <CloudLightning className="w-2.5 h-2.5 text-yellow-300 fill-current" /> Sync
+                    </button>
+                    <button
+                      onClick={() => {
+                        handleSignOut();
+                        setMobileDrawerOpen(false);
+                      }}
+                      className="py-1.5 px-1.5 bg-stone-100 hover:bg-stone-200 dark:bg-stone-800 dark:hover:bg-stone-700 text-[var(--text)] border border-[var(--line)] rounded-lg text-[9px] font-black cursor-pointer"
+                      title="Log out of cloud profile"
+                      type="button"
+                    >
+                      Out
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-[9px] text-gray-500 dark:text-gray-400 leading-normal">
+                    Sync your syllabus layouts in the Cloud securely with Google.
+                  </span>
+                  <button
+                    onClick={() => {
+                      handleSignInGoogle();
+                      setMobileDrawerOpen(false);
+                    }}
+                    className="w-full flex items-center justify-center gap-2 py-1.5 px-3 bg-gradient-to-r from-purple-600 to-indigo-600 text-white border-0 rounded-lg text-[9px] font-black uppercase tracking-widest cursor-pointer shadow"
+                    type="button"
+                  >
+                    <LogIn className="w-3 h-3" /> Sign in with Google
+                  </button>
+                </div>
+              )}
+            </div>
+
             <nav className="drawer-nav flex flex-col gap-1 overflow-y-auto max-h-[70%] pr-1">
               {[
                 { r: "dashboard", label: "Dashboard", desc: "Your course list" },
@@ -625,7 +801,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Desktop Persistent Sidebar */}
+       {/* Desktop Persistent Sidebar */}
       <aside className="sidebar">
         <div className="brand" id="brand-header">
           <div className="logo">F</div>
@@ -633,6 +809,58 @@ export default function App() {
             <h1>Feynman AI</h1>
             <p>Mastery through teaching</p>
           </div>
+        </div>
+
+        {/* Firebase Cloud Sync Control Container */}
+        <div className="flex flex-col gap-2 p-3.5 bg-[var(--panel)] border border-[var(--line)] rounded-2xl mb-4 shadow-sm" id="firebase-auth-sidebar-widget">
+          {user ? (
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 text-white text-xs font-bold flex items-center justify-center shrink-0 shadow-md border border-white/20">
+                  {user.displayName ? user.displayName[0] : (user.email ? user.email[0].toUpperCase() : "U")}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <span className="text-xs font-black text-[var(--text)] block truncate leading-tight">
+                    {user.displayName || "Explorer"}
+                  </span>
+                  <span className="text-[10px] text-emerald-500 dark:text-emerald-400 font-bold flex items-center gap-1 select-none">
+                    <Cloud className="w-3 h-3 fill-emerald-500/10" /> Cloud database active
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <button
+                  onClick={handleSyncLocalCoursesToCloud}
+                  className="flex-1 py-1.5 px-2 bg-purple-600 hover:bg-purple-700 text-white border-0 rounded-lg text-[9px] font-black uppercase tracking-wider cursor-pointer transition-colors flex items-center justify-center gap-1"
+                  title="Upload offline syllabus data to Firestore"
+                  type="button"
+                >
+                  <CloudLightning className="w-3 h-3 text-yellow-300 fill-current" /> Sync Local
+                </button>
+                <button
+                  onClick={handleSignOut}
+                  className="py-1.5 px-2 bg-stone-100 hover:bg-stone-200 dark:bg-stone-800 dark:hover:bg-stone-700 text-[var(--text)] border border-[var(--line)] rounded-lg text-[9px] font-bold cursor-pointer transition-colors"
+                  title="Log out of cloud profile"
+                  type="button"
+                >
+                  Sign Out
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2 p-1">
+              <span className="text-[10px] text-gray-500 dark:text-gray-400 leading-normal">
+                Sign in with Google to securely sync your syllabus layouts in the Cloud.
+              </span>
+              <button
+                onClick={handleSignInGoogle}
+                className="w-full flex items-center justify-center gap-2 py-2 px-3.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:opacity-90 text-white border-0 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all hover:scale-[1.01] cursor-pointer shadow"
+                type="button"
+              >
+                <LogIn className="w-3.5 h-3.5" /> Google Sign-in
+              </button>
+            </div>
+          )}
         </div>
 
         <button

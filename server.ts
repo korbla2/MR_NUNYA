@@ -316,28 +316,22 @@ app.post("/api/extract-file", upload.single("file"), async (req, res) => {
 
     if (mime.includes("pdf") || lowerName.endsWith(".pdf")) {
       console.log("[ExtractFile] Processing as PDF...");
-      const { PDFParse } = pdfParseModule;
-      if (!PDFParse) {
-        console.error("[ExtractFile] PDFParse constructor missing in pdf-parse module.");
-        throw new Error("PDFParse constructor not found in pdf-parse module.");
-      }
-      const parser = new PDFParse({ data: req.file.buffer });
       let text = "";
       let pages = 1;
       let usedGeminiOCR = false;
 
       try {
-        console.log("[ExtractFile] Instantiated parser, calling parser.getText()...");
-        const result = await parser.getText();
+        console.log("[ExtractFile] Calling pdf-parse function...");
+        const pdfParser = typeof pdfParseModule === "function" ? pdfParseModule : (pdfParseModule?.default || pdfParseModule);
+        if (typeof pdfParser !== "function") {
+          throw new Error("Resolved pdf-parse is not a function.");
+        }
+        const result = await pdfParser(req.file.buffer);
         text = result.text || "";
-        pages = result.total || 1;
+        pages = result.numpages || 1;
         console.log(`[ExtractFile] PDF parsing succeeded. Pages: ${pages}, Raw text length: ${text.length}`);
       } catch (pdfErr: any) {
-        console.error("[ExtractFile] Error inside PDFParse.getText() fallback check:", pdfErr);
-      } finally {
-        await parser.destroy().catch((destroyErr) => {
-          console.error("[ExtractFile] Error destroying parser instance:", destroyErr);
-        });
+        console.error("[ExtractFile] Error inside pdf-parse call:", pdfErr);
       }
 
       // Automatically fall back to Gemini OCR structure if extracted text is empty or very short
@@ -549,6 +543,43 @@ app.post("/api/ai/openai-compatible", async (req, res) => {
     res.json({ text: parsedData.choices?.[0]?.message?.content || "" });
   } catch (err: any) {
     res.status(500).json({ error: "OpenAI-compatible request failed.", detail: err.message });
+  }
+});
+
+// Proxied OpenRouter endpoints
+app.post("/api/ai/openrouter", async (req, res) => {
+  try {
+    const { apiKey, model, prompt, json = false } = req.body || {};
+    const resolvedApiKey = apiKey || process.env.OPENROUTER_API_KEY;
+    if (!resolvedApiKey) {
+      return res.status(400).json({ error: "OpenRouter API Key is required. Please set the OPENROUTER_API_KEY environment variable in the Secrets manager, or provide an API Key in the settings." });
+    }
+    if (!prompt) {
+      return res.status(400).json({ error: "prompt is a required value." });
+    }
+    const resolvedModel = model || "google/gemini-2.5-flash";
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: { 
+        "Content-Type": "application/json", 
+        "Authorization": `Bearer ${resolvedApiKey}`,
+        "HTTP-Referer": "https://ai.studio/build",
+        "X-Title": "Feynman AI Tutor"
+      },
+      body: JSON.stringify({
+        model: resolvedModel,
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.25,
+        response_format: json ? { type: "json_object" } : undefined
+      })
+    });
+    const parsedData = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      return res.status(response.status).json(parsedData);
+    }
+    res.json({ text: parsedData.choices?.[0]?.message?.content || "" });
+  } catch (err: any) {
+    res.status(500).json({ error: "OpenRouter request failed.", detail: err.message });
   }
 });
 

@@ -1,6 +1,7 @@
 import React, { useState, useRef } from "react";
 import { Course, Lesson, Chapter, AISettings, Attempt } from "../types";
 import { getLesson, makeDetailedExplanation } from "../utils";
+import { callAIApi } from "../utils/ai";
 
 interface CodeBlock {
   type: "code" | "text";
@@ -286,36 +287,12 @@ Lesson Key Terms: ${lesson.keyTerms.join(", ")}
 Source Paragraph Context:
 "${lesson.sourceText}"`;
 
-      if (settings.provider === "gemini") {
-        const res = await fetch("/api/ai/gemini", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt }),
-        });
-        if (res.ok) responseText = (await res.json()).text || "";
-      } else if (settings.provider === "ollama") {
-        const res = await fetch("/api/ai/ollama", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ollamaUrl: settings.ollamaUrl,
-            model: settings.model || "qwen2.5:7b",
-            prompt,
-          }),
-        });
-        if (res.ok) responseText = (await res.json()).text || "";
-      } else if (settings.provider === "openai-compatible") {
-        const res = await fetch("/api/ai/openai-compatible", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            apiBase: settings.apiBase,
-            apiKey: settings.apiKey,
-            model: settings.paidModel || settings.model,
-            prompt,
-          }),
-        });
-        if (res.ok) responseText = (await res.json()).text || "";
+      if (settings.provider !== "demo") {
+        try {
+          responseText = await callAIApi(settings, prompt, false);
+        } catch (aiErr) {
+          console.error("AI Lesson tutoring request failed:", aiErr);
+        }
       }
 
       if (!responseText) {
@@ -387,38 +364,12 @@ Source Reference Text:\n"${lesson.sourceText}"
 Student Explanation Attempt:\n"${answerText}"`;
 
       let rawResponse = "";
-      if (settings.provider === "gemini") {
-        const res = await fetch("/api/ai/gemini", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt, json: true }),
-        });
-        if (res.ok) rawResponse = (await res.json()).text || "";
-      } else if (settings.provider === "ollama") {
-        const res = await fetch("/api/ai/ollama", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ollamaUrl: settings.ollamaUrl,
-            model: settings.model || "qwen2.5:7b",
-            prompt,
-            json: true,
-          }),
-        });
-        if (res.ok) rawResponse = (await res.json()).text || "";
-      } else if (settings.provider === "openai-compatible") {
-        const res = await fetch("/api/ai/openai-compatible", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            apiBase: settings.apiBase,
-            apiKey: settings.apiKey,
-            model: settings.paidModel || settings.model,
-            prompt,
-            json: true,
-          }),
-        });
-        if (res.ok) rawResponse = (await res.json()).text || "";
+      if (settings.provider !== "demo") {
+        try {
+          rawResponse = await callAIApi(settings, prompt, true);
+        } catch (aiErr) {
+          console.error("AI Lesson explanation evaluation failed:", aiErr);
+        }
       }
 
       let parsedResult = null;

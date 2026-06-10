@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Course, SourceDraft, AISettings } from "../types";
 import { heuristicCourse, uid } from "../utils";
+import { callAIApi } from "../utils/ai";
 
 const CODING_TRACKS = [
   {
@@ -284,46 +285,14 @@ Learning Intended Goal: ${draft.goal}.
 Source Subject Name: ${draft.title || "Untitled"}.
 Full text to analyze:\n${draft.text.slice(0, 10000)}`;
 
-      if (settings.provider === "gemini") {
-        const res = await fetch("/api/ai/gemini", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt, json: true }),
-        });
-        if (res.ok) {
-          const aiData = await res.json();
-          createdCourse = normalizeAICourse(parseAIJson(aiData.text), draft);
-        }
-      } else if (settings.provider === "ollama") {
-        const res = await fetch("/api/ai/ollama", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ollamaUrl: settings.ollamaUrl,
-            model: settings.model || "qwen2.5:7b",
-            prompt,
-            json: true,
-          }),
-        });
-        if (res.ok) {
-          const aiData = await res.json();
-          createdCourse = normalizeAICourse(parseAIJson(aiData.text), draft);
-        }
-      } else if (settings.provider === "openai-compatible") {
-        const res = await fetch("/api/ai/openai-compatible", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            apiBase: settings.apiBase,
-            apiKey: settings.apiKey,
-            model: settings.paidModel || settings.model,
-            prompt,
-            json: true,
-          }),
-        });
-        if (res.ok) {
-          const aiData = await res.json();
-          createdCourse = normalizeAICourse(parseAIJson(aiData.text), draft);
+      if (settings.provider !== "demo") {
+        try {
+          const aiResponseText = await callAIApi(settings, prompt, true);
+          if (aiResponseText) {
+            createdCourse = normalizeAICourse(parseAIJson(aiResponseText), draft);
+          }
+        } catch (aiErr) {
+          console.error("AI Generation failed:", aiErr);
         }
       }
 

@@ -1,0 +1,62 @@
+{
+  "entities": {
+    "Course": {
+      "title": "Course",
+      "description": "Represents a custom visual Feynman study course with chapters, lessons and exam outcomes",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique UUID of the course"
+        },
+        "title": {
+          "type": "string",
+          "description": "Short heading of the study course"
+        },
+        "summary": {
+          "type": "string",
+          "description": "Abstract description of what is covered"
+        },
+        "level": {
+          "type": "string",
+          "description": "Difficulty level of course material"
+        },
+        "goal": {
+          "type": "string",
+          "description": "Human objective of the study track"
+        },
+        "sourceType": {
+          "type": "string",
+          "description": "Format of source content"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Strict ISO time string"
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "The authenticated creator's uid"
+        },
+        "chapters": {
+          "type": "array",
+          "description": "Recursive hierarchy containing syllabus lessons and exam checklists"
+        },
+        "finalExam": {
+          "type": "array",
+          "description": "Review questions covering the course material"
+        },
+        "finalExamResult": {
+          "type": "object",
+          "description": "Outcomes of course overall assessment"
+        }
+      },
+      "required": ["id", "title", "createdAt", "ownerId"]
+    }
+  },
+  "firestore": {
+    "/courses/{courseId}": {
+      "schema": "Course",
+      "description": "Collections of Feynman Study courses indexed by UUID"
+    }
+  }
+}

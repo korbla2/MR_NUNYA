@@ -1,0 +1,60 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Reusable global helpers (Primitives)
+    function isIdValid(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+    
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(existingData) {
+      return isSignedIn() && existingData.ownerId == request.auth.uid;
+    }
+    
+    function incoming() {
+      return request.resource.data;
+    }
+    
+    function existing() {
+      return resource.data;
+    }
+
+    // Abstract entity helper validator to block shadow key updates and value poisoning
+    function isValidCourse(data) {
+      return data.id is string
+        && data.title is string
+        && data.title.size() <= 200
+        && data.ownerId == request.auth.uid;
+    }
+
+    // Collection: Courses
+    match /courses/{courseId} {
+      allow create: if isSignedIn()
+        && isIdValid(courseId)
+        && isValidCourse(incoming())
+        && incoming().createdAt is string;
+
+      allow get: if isSignedIn() && isOwner(existing());
+      
+      // Enforce query filtering on the database itself to avoid client query scraping
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+
+      // Allow updates only when matching current owner, and preserve immutable properties (ownerId, createdAt)
+      allow update: if isSignedIn()
+        && isOwner(existing())
+        && isValidCourse(incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt;
+
+      allow delete: if isSignedIn() && isOwner(existing());
+    }
+  }
+}
